@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.models.Model;
+import io.swagger.models.Path;
 import io.swagger.models.Response;
 import io.swagger.models.Swagger;
 import io.swagger.models.auth.AuthorizationValue;
@@ -93,6 +94,68 @@ public class ResolverCacheTest {
     }
 
     @Test
+    public void testLoadExternalRef_SimpleInclude(@Injectable final Model expectedResult) throws Exception {
+
+        final RefFormat format = RefFormat.URL;
+        final String ref1 = "http://my.company.com/path/to/main.yaml";
+        final String contentsOfExternalFile1 = "swagger: \"2.0\"\n" + 
+        		"\n" + 
+        		"info:\n" + 
+        		"  version: 1.0.0\n" + 
+        		"  title: Path include test case\n" + 
+        		"\n" + 
+        		"paths:\n" + 
+        		"  /foo:\n" + 
+        		"    $ref: './child.yaml#/paths/~1foo'\n";
+        final String ref2 = "http://my.company.com/path/to/child.yaml";
+        final String contentsOfExternalFile2 = "swagger: \"2.0\"\n" + 
+        		"\n" + 
+        		"info:\n" + 
+        		"  version: 1.0.0\n" + 
+        		"  title: Path include test case child\n" + 
+        		"\n" + 
+        		"paths:\n" + 
+        		"  /foo:\n" + 
+        		"    get:\n" + 
+        		"      responses:\n" + 
+        		"        200:\n" + 
+        		"          description: \"Request successful\"\n";
+
+        new Expectations() {{
+            RefUtils.readExternalUrlRef(ref2, format, auths, "http://my.company.com/path/main.yaml");
+            times = 1;
+            result = contentsOfExternalFile2;
+
+            DeserializationUtils.deserialize(contentsOfExternalFile, ref, Model.class);
+            times = 1;
+            result = expectedResult;
+        }};
+
+        ResolverCache cache = new ResolverCache(swagger, auths, "http://my.company.com/path/parent.json");
+
+        Model firstActualResult = cache.loadRef(ref, RefFormat.URL, Model.class);
+
+        assertEquals(contentsOfExternalFile, cache.getExternalFileCache().get(ref));
+        assertEquals(expectedResult, cache.getResolutionCache().get(ref));
+        assertEquals(expectedResult, firstActualResult);
+
+        //requesting the same ref a second time should not result in reading the external file again
+        Model secondActualResult = cache.loadRef(ref, format, Model.class);
+        assertEquals(expectedResult, secondActualResult);
+
+    }
+
+//  @Test
+//  public void testLoadInternalPathRefWithEscapedCharacters(@Injectable Path mockedPath) throws Exception {
+//      Swagger swagger = new Swagger();
+//      swagger.path("foo", mockedPath);
+//
+//      ResolverCache cache = new ResolverCache(swagger, auths, null);
+//      Path actualResult = cache.loadRef("#/paths/foo", RefFormat.INTERNAL, Path.class);
+//      assertEquals(actualResult, mockedPath);
+//  }
+
+    @Test
     public void testLoadInternalParameterRef(@Injectable Parameter mockedParameter) throws Exception {
         Swagger swagger = new Swagger();
         swagger.parameter("foo", mockedParameter);
@@ -138,6 +201,15 @@ public class ResolverCacheTest {
         assertEquals(actualResult, mockedModel);
     }
     
+    @Test
+    public void testLoadInternalDefinitionRefWithEscapedCharacters(@Injectable Model mockedModel) throws Exception {
+        Swagger swagger = new Swagger();
+        swagger.addDefinition("foo~bar/baz~1", mockedModel);
+
+        ResolverCache cache = new ResolverCache(swagger, auths, null);
+        Model actualResult = cache.loadRef("#/definitions/foo~0bar~1baz~01", RefFormat.INTERNAL, Model.class);
+        assertEquals(actualResult, mockedModel);
+    }
     
     @Test
     public void testLoadInternalResponseRef(@Injectable Response mockedResponse) throws Exception {
@@ -164,7 +236,6 @@ public class ResolverCacheTest {
         Response actualResult = cache.loadRef("#/responses/foo bar", RefFormat.INTERNAL, Response.class);
         assertEquals(actualResult, mockedResponse);
     }
-
 
     @Test
     public void testRenameCache() throws Exception {
